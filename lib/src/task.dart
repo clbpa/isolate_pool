@@ -13,7 +13,7 @@ abstract class Task<T> {
 
   TaskContext? get context => null;
 
-  FutureOr<T> compute<C extends TaskContext>(StreamSink progress, [C? context]);
+  FutureOr<T> compute(StreamSink progress, TaskContext? context);
 
   final StreamController _progress = StreamController.broadcast(sync: true);
   final Completer<T> _result = Completer();

@@ -62,7 +62,7 @@ class _Worker {
 class _IsolateCallRequest {
   _IsolateCallRequest(this.compute, this.progress, [this.context]);
 
-  final FutureOr Function(StreamSink progress, [TaskContext? context]) compute;
+  final FutureOr Function(StreamSink progress, TaskContext? context) compute;
   final StreamSink progress;
   final TaskContext? context;
 }
