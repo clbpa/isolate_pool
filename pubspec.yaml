@@ -1,6 +1,6 @@
 name: isolate_pool
 description: Spawn isolate depends on your system.
-version: 1.0.0
+version: 1.0.1
 homepage: https://github.com/clbpa/isolate_pool
 publish_to: none
 
@@ -8,8 +8,6 @@ environment:
   sdk: '>=2.18.1 <3.0.0'
 
 dependencies:
-  async: ^2.9.0
-  collection: ^1.16.0
   logging: ^1.0.2
 
 dev_dependencies:

@@ -9,48 +9,71 @@ class _Worker {
   late RawReceivePort _receivePort;
   late SendPort _sendPort;
 
-  late Completer<dynamic> _result;
+  late Completer<List<dynamic>> _result;
 
-  String? _runningTask;
-
-  String? get runningTask => _runningTask;
+  Task<dynamic, dynamic>? _runningTask;
 
   Future<void> init() async {
     final initCompleter = Completer();
-    _receivePort = RawReceivePort((message) {
-      if (message is ValueResult) {
-        _result.complete(message.value);
-        _runningTask = null;
-        return;
-      }
-      if (message is ErrorResult) {
-        _result.completeError(message.error);
-        _runningTask = null;
-        return;
-      }
-      if (message is SendPort) {
-        _sendPort = message;
-        initCompleter.complete(true);
-      }
-    }, '$name-receive-port');
+    _receivePort = RawReceivePort(
+      (message) {
+        if (message is List<dynamic>) {
+          _result.complete(message);
+          _runningTask = null;
+          return;
+        }
+
+        if (message is SendPort) {
+          _sendPort = message;
+          initCompleter.complete(true);
+          return;
+        }
+
+        _runningTask?._updateController.add(message);
+      },
+      '$name-receive-port',
+    );
     _isolate = await Isolate.spawn(
       _spawn,
       _receivePort.sendPort,
       debugName: '$name-isolate',
     );
+
     await initCompleter.future;
   }
 
-  Future<T> work<T>(Task<T> task) async {
-    _runningTask = task.id;
-    _result = Completer();
-    _sendPort.send(_IsolateCallRequest(
-      task.compute,
-      task._progress,
-      task.context,
-    ));
-    final result = await _result.future;
-    return result;
+  Future<T> work<T>(Task<T, dynamic> task) async {
+    _runningTask = task;
+    _result = Completer<List<dynamic>>();
+    _sendPort.send(_IsolateCallRequest(_execute, task._runnable));
+
+    final response = await _result.future;
+
+    final int type = response.length;
+    assert(1 <= type && type <= 3);
+
+    switch (type) {
+      // success; see _buildSuccessResponse
+      case 1:
+        return response[0] as T;
+
+      // native error; see Isolate.addErrorListener
+      case 2:
+        await Future<Never>.error(RemoteError(
+          response[0] as String,
+          response[1] as String,
+        ));
+
+      // caught error; see _buildErrorResponse
+      case 3:
+      default:
+        assert(type == 3 && response[2] == null);
+
+        await Future<Never>.error(
+          response[0] as Object,
+          response[1] as StackTrace,
+        );
+    }
   }
 
   Future<void> kill() async {
@@ -59,32 +82,35 @@ class _Worker {
   }
 }
 
-class _IsolateCallRequest {
-  _IsolateCallRequest(this.compute, this.progress, [this.context]);
+FutureOr<dynamic> _execute(_Runnable<dynamic, dynamic> runnable) => runnable();
 
-  final FutureOr Function(StreamSink progress, TaskContext? context) compute;
-  final StreamSink progress;
-  final TaskContext? context;
+class _IsolateCallRequest {
+  _IsolateCallRequest(this.function, this.argument);
+
+  final FutureOr<dynamic> Function(_Runnable<dynamic, dynamic>) function;
+  final _Runnable<dynamic, dynamic> argument;
 }
 
 void _spawn(SendPort sendPort) {
-  final receivePort = RawReceivePort((request) async {
-    request as _IsolateCallRequest;
+  final receivePort = RawReceivePort((_IsolateCallRequest request) async {
+    late final List<dynamic> computationResult;
+
     try {
-      final computed = await request.compute.call(
-        request.progress,
-        request.context,
-      );
-      sendPort.send(Result.value(computed));
+      request.argument.updater = Updater(sendPort);
+      computationResult =
+          _buildSuccessResponse(await request.function(request.argument));
     } catch (error, stackTrace) {
-      try {
-        sendPort.send(Result.error(error, stackTrace));
-      } catch (error) {
-        sendPort.send(Result.error(
-          'cant send error with too big stackTrace, error is : ${error.toString()}',
-        ));
-      }
+      computationResult = _buildErrorResponse(error, stackTrace);
     }
+
+    sendPort.send(computationResult);
   });
   sendPort.send(receivePort.sendPort);
 }
+
+List<dynamic> _buildSuccessResponse(dynamic result) => List.filled(1, result);
+
+List<dynamic> _buildErrorResponse(Object error, StackTrace stack) =>
+    List.filled(3, null)
+      ..[0] = error
+      ..[1] = stack;
