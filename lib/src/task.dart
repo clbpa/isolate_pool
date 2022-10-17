@@ -39,4 +39,9 @@ class Task<T, M> {
     assert(running, "Task $name is not running");
     _onCancel();
   }
+
+  Future<void> dispose() {
+    assert(!_updateController.isClosed);
+    return _updateController.close();
+  }
 }
